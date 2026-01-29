@@ -63,6 +63,9 @@ TMDB_SEARCH_TV = 'https://api.themoviedb.org/3/search/tv'
 # Common video extensions
 VIDEO_EXTENSIONS = {'.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.flv', '.webm', '.iso'}
 
+# Common audio extensions
+AUDIO_EXTENSIONS = {'.mp3', '.flac', '.m4a', '.aac', '.ogg', '.wav', '.wma', '.alac', '.aiff', '.opus'}
+
 # Common media folder locations
 COMMON_PATHS = [
     Path("/Volumes"),
@@ -108,16 +111,18 @@ SEASON_FOLDER_PATTERNS = [
 @dataclass
 class MediaInfo:
     """Parsed media information"""
-    original_path: Path  # For movies: the folder. For TV: the video file
+    original_path: Path  # For movies: the folder. For TV/Music: the file
     title: str
     year: Optional[int]
     is_tv: bool
-    season: Optional[int] = None
+    is_music: bool = False
+    season: Optional[int] = None  # For music: track number
     episode: Optional[int] = None
-    episode_title: Optional[str] = None
+    episode_title: Optional[str] = None  # For music: album name
+    artist: Optional[str] = None  # For music only
     tmdb_id: Optional[int] = None
     tmdb_verified: bool = False
-    new_path: Optional[Path] = None  # For movies: new folder path. For TV: new file path
+    new_path: Optional[Path] = None  # For movies: new folder path. For TV/Music: new file path
     selected: bool = True
 
 
@@ -229,6 +234,131 @@ def search_tmdb_tv(title: str, year: Optional[int] = None) -> Optional[Dict]:
     except Exception:
         pass
     return None
+
+
+def search_musicbrainz(artist: str, album: str = None) -> Optional[Dict]:
+    """Search MusicBrainz for artist/album info."""
+    if not HAS_REQUESTS:
+        return None
+
+    headers = {'User-Agent': 'PlexNamer/1.0 (https://github.com/stonefruit7/plex-namer)'}
+
+    try:
+        if album:
+            # Search for release (album)
+            query = f'artist:"{artist}" AND release:"{album}"'
+            url = f'https://musicbrainz.org/ws/2/release/?query={query}&fmt=json&limit=1'
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                results = response.json().get('releases', [])
+                if results:
+                    release = results[0]
+                    return {
+                        'artist': release.get('artist-credit', [{}])[0].get('name', artist),
+                        'album': release.get('title', album),
+                        'year': release.get('date', '')[:4] if release.get('date') else None,
+                        'id': release.get('id')
+                    }
+        else:
+            # Search for artist only
+            url = f'https://musicbrainz.org/ws/2/artist/?query=artist:"{artist}"&fmt=json&limit=1'
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                results = response.json().get('artists', [])
+                if results:
+                    return {
+                        'artist': results[0].get('name', artist),
+                        'id': results[0].get('id')
+                    }
+    except Exception:
+        pass
+    return None
+
+
+def extract_track_info(filename: str) -> Tuple[Optional[int], Optional[str]]:
+    """Extract track number and title from filename."""
+    name = Path(filename).stem
+
+    # Pattern: "01 - Track Title" or "01. Track Title" or "01 Track Title"
+    match = re.match(r'^(\d{1,3})[\s\.\-]+(.+)$', name)
+    if match:
+        return int(match.group(1)), match.group(2).strip()
+
+    # Pattern: "Track Title" (no number)
+    return None, name
+
+
+def parse_music_folder(artist_folder: Path) -> List[MediaInfo]:
+    """Parse an artist folder and return list of tracks to rename."""
+    results = []
+    artist_name = artist_folder.name
+
+    # Look up artist on MusicBrainz
+    mb_artist = search_musicbrainz(artist_name)
+    if mb_artist:
+        artist_name = mb_artist.get('artist', artist_name)
+
+    try:
+        for album_folder in artist_folder.iterdir():
+            if not album_folder.is_dir() or album_folder.name.startswith('.'):
+                continue
+
+            album_name = album_folder.name
+            album_year = None
+
+            # Try to extract year from album folder name
+            year_match = re.search(r'\((\d{4})\)$', album_name)
+            if year_match:
+                album_year = int(year_match.group(1))
+                album_name = album_name[:year_match.start()].strip()
+
+            # Look up album on MusicBrainz
+            mb_album = search_musicbrainz(artist_name, album_name)
+            if mb_album:
+                album_name = mb_album.get('album', album_name)
+                if mb_album.get('year'):
+                    album_year = int(mb_album['year'])
+
+            # Process audio files in album folder
+            for audio_file in album_folder.iterdir():
+                if not audio_file.is_file() or audio_file.suffix.lower() not in AUDIO_EXTENSIONS:
+                    continue
+
+                track_num, track_title = extract_track_info(audio_file.name)
+
+                # Build new path
+                new_artist_folder = artist_folder.parent / artist_name
+                if album_year:
+                    new_album_folder = new_artist_folder / f"{album_name} ({album_year})"
+                else:
+                    new_album_folder = new_artist_folder / album_name
+
+                if track_num:
+                    new_filename = f"{track_num:02d} - {track_title}{audio_file.suffix}"
+                else:
+                    new_filename = f"{track_title}{audio_file.suffix}"
+
+                new_path = new_album_folder / new_filename
+
+                info = MediaInfo(
+                    original_path=audio_file,
+                    title=track_title,
+                    year=album_year,
+                    is_tv=False,
+                    is_music=True,
+                    season=track_num,  # Track number
+                    episode_title=album_name,  # Album name
+                    artist=artist_name,
+                    tmdb_verified=mb_album is not None,
+                    new_path=new_path
+                )
+
+                if audio_file != new_path:
+                    results.append(info)
+    except PermissionError:
+        pass
+
+    return results
 
 
 def is_single_media_folder(path: Path) -> bool:
@@ -419,7 +549,14 @@ def collect_changes(path: Path, media_type: str) -> List[MediaInfo]:
                     info = parse_movie_folder(item)
                     if info and needs_rename(info):
                         all_changes.append(info)
-        else:
+        elif media_type == 'music':
+            for item in path.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    tracks = parse_music_folder(item)
+                    for track in tracks:
+                        if needs_rename(track):
+                            all_changes.append(track)
+        else:  # tv
             for item in path.iterdir():
                 if item.is_dir() and not item.name.startswith('.'):
                     episodes = parse_tv_show_folder(item)
@@ -437,8 +574,8 @@ def apply_changes(changes: List[MediaInfo]) -> int:
         if not info.selected or info.new_path is None:
             continue
         try:
-            if info.is_tv:
-                # TV: original_path is video file, new_path is new file location
+            if info.is_tv or info.is_music:
+                # TV/Music: original_path is file, new_path is new file location
                 info.new_path.parent.mkdir(parents=True, exist_ok=True)
                 info.original_path.rename(info.new_path)
             else:
@@ -698,11 +835,12 @@ if HAS_TUI:
 
 
     class MediaTypeScreen(Screen):
-        """Step 2: Choose Movies or TV Shows."""
+        """Step 2: Choose Movies, TV Shows, or Music."""
 
         BINDINGS = [
             Binding("m", "select_movies", "Movies"),
             Binding("t", "select_tv", "TV Shows"),
+            Binding("u", "select_music", "Music"),
             Binding("escape", "go_back", "Back"),
             Binding("q", "go_back", "Back"),
         ]
@@ -722,6 +860,7 @@ if HAS_TUI:
 
                     yield Button("🎥 Movies", id="btn-movies", classes="menu-button", variant="primary")
                     yield Button("📺 TV Shows", id="btn-tv", classes="menu-button", variant="primary")
+                    yield Button("🎵 Music", id="btn-music", classes="menu-button", variant="primary")
                     yield Button("← Back", id="btn-back", classes="menu-button")
             yield Footer()
 
@@ -730,6 +869,8 @@ if HAS_TUI:
                 self.action_select_movies()
             elif event.button.id == "btn-tv":
                 self.action_select_tv()
+            elif event.button.id == "btn-music":
+                self.action_select_music()
             elif event.button.id == "btn-back":
                 self.app.pop_screen()
 
@@ -750,6 +891,15 @@ if HAS_TUI:
             else:
                 # Use the selected folder directly
                 self.app.push_screen(RenameScreen(self.plex_folder, "tv"))
+
+        def action_select_music(self) -> None:
+            # Check for Music subfolder
+            music_path = self.plex_folder / "Music"
+            if music_path.exists():
+                self.app.push_screen(RenameScreen(music_path, "music"))
+            else:
+                # Use the selected folder directly
+                self.app.push_screen(RenameScreen(self.plex_folder, "music"))
 
         def action_go_back(self) -> None:
             self.app.pop_screen()
@@ -980,10 +1130,10 @@ if HAS_TUI:
 
             count = apply_changes(selected)
 
-            # Only clean up empty folders for TV shows (where we moved individual files)
+            # Only clean up empty folders for TV shows and music (where we moved individual files)
             # For movies, we renamed the whole folder so nothing to clean up
             for info in selected:
-                if info.is_tv:
+                if info.is_tv or info.is_music:
                     cleanup_empty_folders(info.original_path.parent)
 
             # Show notification immediately

@@ -14,9 +14,11 @@ The Grand Budapest Hotel (2014)/The Grand Budapest Hotel (2014).mkv
 
 ## Features
 
-- Handles both **Movies** and **TV Shows**
+- Handles **Movies**, **TV Shows**, and **Music**
 - Auto-detects media type or specify manually
-- **TMDb integration** for accurate titles and years (optional)
+- **TMDb integration** for accurate movie/TV titles and years (optional)
+- **MusicBrainz integration** for accurate artist/album names (automatic)
+- Interactive TUI with file browser
 - Preview mode to see changes before applying
 - Cleans up empty folders after renaming
 - Preserves already-correct folder names
@@ -25,7 +27,7 @@ The Grand Budapest Hotel (2014)/The Grand Budapest Hotel (2014).mkv
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/plex-namer.git
+git clone https://github.com/stonefruit7/plex-namer.git
 cd plex-namer
 
 # Install with all features (recommended)
@@ -40,7 +42,7 @@ pip install -e .           # Basic (no extras)
 Or install directly from GitHub:
 
 ```bash
-pip install "git+https://github.com/YOUR_USERNAME/plex-namer.git#egg=plex-namer[all]"
+pip install "git+https://github.com/stonefruit7/plex-namer.git#egg=plex-namer[all]"
 ```
 
 ## Usage
@@ -63,7 +65,7 @@ python plex_namer.py /path/to/media --no-confirm
 | Flag | Description |
 |------|-------------|
 | `--dry-run`, `-n` | Preview changes without renaming |
-| `--type`, `-t` | Force media type: `movies`, `tv`, or `auto` (default) |
+| `--type`, `-t` | Force media type: `movies`, `tv`, `music`, or `auto` (default) |
 | `--no-confirm`, `-y` | Skip confirmation prompt |
 
 ### Examples
@@ -115,6 +117,16 @@ TV Shows/
       Show Name (Year) - S01E02 - Episode Title.mkv
     Season 02/
       ...
+```
+
+### Music
+
+```
+Music/
+  Artist Name/
+    Album Name (Year)/
+      01 - Track Title.mp3
+      02 - Track Title.mp3
 ```
 
 ## License
