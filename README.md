@@ -47,17 +47,29 @@ pip install "git+https://github.com/stonefruit7/plex-namer.git#egg=plex-namer[al
 
 ## Usage
 
-### Basic Usage
+### Interactive Mode (Recommended)
+
+```bash
+# Launch the interactive TUI
+plex-namer
+```
+
+This opens a menu where you can:
+1. Select your Plex Media folder
+2. Choose Movies, TV Shows, or Music
+3. Review and apply changes
+
+### Command Line Mode
 
 ```bash
 # Preview changes (recommended first)
-python plex_namer.py /path/to/media --dry-run
+plex-namer /path/to/media --dry-run
 
 # Apply changes (will ask for confirmation)
-python plex_namer.py /path/to/media
+plex-namer /path/to/media
 
 # Apply without confirmation
-python plex_namer.py /path/to/media --no-confirm
+plex-namer /path/to/media --no-confirm
 ```
 
 ### Options
@@ -72,13 +84,16 @@ python plex_namer.py /path/to/media --no-confirm
 
 ```bash
 # Rename movies
-python plex_namer.py "/Volumes/Media/Movies"
+plex-namer "/Volumes/Media/Movies" --type movies
 
 # Rename TV shows
-python plex_namer.py "/Volumes/Media/TV Shows" --type tv
+plex-namer "/Volumes/Media/TV Shows" --type tv
+
+# Rename music
+plex-namer "/Volumes/Media/Music" --type music
 
 # Preview only
-python plex_namer.py ~/Downloads/movies --dry-run
+plex-namer ~/Downloads/movies --dry-run
 ```
 
 ## TMDb Integration
@@ -90,11 +105,11 @@ For more accurate title matching and year verification, set up a free TMDb API k
 3. Set the environment variable:
 
 ```bash
-# One-time use
-TMDB_API_KEY="your_key" python plex_namer.py /path/to/media
-
-# Or add to your shell profile (~/.zshrc or ~/.bashrc)
+# Add to your shell profile (~/.zshrc or ~/.bashrc)
 export TMDB_API_KEY="your_key_here"
+
+# Then just run
+plex-namer
 ```
 
 ## Naming Conventions
